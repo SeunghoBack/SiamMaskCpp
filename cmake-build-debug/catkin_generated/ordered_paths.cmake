@@ -1,1 +1,0 @@
-set(ORDERED_PATHS "/home/nearthlab/catkin_ws/devel/.private/cv_bridge/lib;/opt/ros/kinetic/lib")
