@@ -170,9 +170,6 @@ int main(int argc, const char* argv[]) {
         break;
     }
 
-    //cv::imshow("SiamMask", images);
-    //cv::waitKey(1);
-
     ros::spinOnce();
     loop_rate.sleep();
   }
