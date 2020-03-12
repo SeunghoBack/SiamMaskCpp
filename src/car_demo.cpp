@@ -20,8 +20,8 @@ struct Bbox{
   float y = 0;
   float width = 0;
   float height = 0;
-  float img_width = 0;
-  float img_height = 0;
+  float img_width = O_WIDTH;
+  float img_height = O_HEIGHT;
   float label = 100;
   float by_tracker = 0;
 };
@@ -65,17 +65,72 @@ void drawBox(
     }
 }
 
+enum MODE{
+  NONE = 0,
+  INIT = 1,
+  TRACK = 2
+} ;
+
+MODE none(cv::Mat& images) {
+  if(bbox.label == 3)
+    return MODE::INIT;
+
+  cv::imshow("SiamMask", images);
+  cv::waitKey(1);
+  return MODE::NONE;
+}
+
+MODE init(const Bbox& bbox, State& state, SiamMask& siammask, cv::Mat& images, const torch::Device& device){
+  if(bbox.label == 0)
+  {
+    return MODE::NONE;
+  }
+  std::cout << "Initializing..." << std::endl;
+  cv::Rect roi(bbox.x*bbox.img_width, bbox.y*bbox.img_height, bbox.width*bbox.img_width, bbox.height*bbox.img_height);
+  siameseInit(state, siammask, images, roi, device);
+  cv::rectangle(images, roi, cv::Scalar(0, 255, 0));
+
+  return MODE::TRACK;
+}
+
+MODE track(Bbox& bbox, State& state, SiamMask& siammask, cv::Mat& images, const torch::Device& device, niv_comm::DlBbox& pub_box, const ros::Publisher& pub_tracking){
+  siameseTrack(state, siammask, images, device);
+  overlayMask(images, state.mask, images);
+  drawBox(images, state.rotated_rect, cv::Scalar(0, 255, 0));
+
+  pub_box.x = state.rotated_rect.boundingRect2f().x / bbox.img_width;
+  pub_box.y = state.rotated_rect.boundingRect2f().y / bbox.img_height;
+  pub_box.width = state.rotated_rect.boundingRect2f().width / bbox.img_width;
+  pub_box.height = state.rotated_rect.boundingRect2f().height / bbox.img_height;
+  pub_box.label = 3;
+  pub_box.by_tracker = 1;
+  pub_box.img_height = bbox.img_height;
+  pub_box.img_width = bbox.img_width;
+  pub_tracking.publish(pub_box);
+
+  cv::imshow("SiamMask", images);
+  cv::waitKey(1);
+
+  auto area = pub_box.width * pub_box.height;
+
+  if(area < 0.0015)
+  {
+    bbox.label = 0;
+    return MODE::NONE;
+  }
+
+  return MODE::TRACK;
+}
+
 int main(int argc, const char* argv[]) {
- // bool remap_name = true;
   std::map<std::string, std::string> remaps;
-  //if (remap_name) remaps["__name"] = "test_node";
 
   ros::init(remaps, "car_tracking");
   ros::NodeHandle nh_tracking;
   //ros::Subscriber sub_image = nh_tracking.subscribe("/vision/image", 10, msgCallback_img);
-  ros::Subscriber sub_image = nh_tracking.subscribe("/videofile/image_raw", 10, msgCallback_img);
-  ros::Subscriber sub_box = nh_tracking.subscribe("/car_detection_dl/info", 10, msgCallback_box);
-  ros::Publisher pub_tracking = nh_tracking.advertise<niv_comm::DlBbox>("/car_detection_dl/tracking_box",100);
+  ros::Subscriber sub_image = nh_tracking.subscribe("/videofile/image_raw", 1, msgCallback_img);
+  ros::Subscriber sub_box = nh_tracking.subscribe("/car_detection_dl/info", 1, msgCallback_box);
+  ros::Publisher pub_tracking = nh_tracking.advertise<niv_comm::DlBbox>("/car_detection_dl/tracking_box",1);
   ros::Rate loop_rate(20);
   cv::Mat images;
 
@@ -93,47 +148,30 @@ int main(int argc, const char* argv[]) {
   State state;
   state.load_config(parser.retrieve<std::string>("config"));
 
-  auto trigger = 1;
+  auto mode = MODE::NONE;
 
+  cv::namedWindow("SiamMask");
   while (ros::ok()){
     images = cv::Mat(O_HEIGHT, O_WIDTH, CV_8UC3, &Img_data);
     cv::resize(images, images, cv::Size(O_WIDTH, O_HEIGHT));
-
-    cv::namedWindow("SiamMask");
-
-    cv::Mat& src = images;
-
-    if (bbox.label == 3 && trigger == 1) {
-      std::cout << "Initializing..." << std::endl;
-      cv::Rect roi(bbox.x*bbox.img_width, bbox.y*bbox.img_height, bbox.width*bbox.img_width, bbox.height*bbox.img_height);
-      siameseInit(state, siammask, src, roi, device);
-      cv::rectangle(src, roi, cv::Scalar(0, 255, 0));
-      trigger = 0;
-      //bbox.label = 0;
-    }
-    else if (bbox.label == 0 || trigger == 0) {
-      siameseTrack(state, siammask, src, device);
-      overlayMask(src, state.mask, src);
-      drawBox(src, state.rotated_rect, cv::Scalar(0, 255, 0));
-    }
-    else{
-    }
-
-    cv::imshow("SiamMask", src);
-    cv::waitKey(1);
-
     niv_comm::DlBbox pub_box;
-    if (bbox.label != 100)
-      pub_box.x = state.rotated_rect.boundingRect2f().x/bbox.img_width;
-      pub_box.y = state.rotated_rect.boundingRect2f().y/bbox.img_height;
-      pub_box.width = state.rotated_rect.boundingRect2f().width/bbox.img_width;
-      pub_box.height = state.rotated_rect.boundingRect2f().height/bbox.img_height;
-      pub_box.label = 3;
-      pub_box.by_tracker = 1;
-      pub_box.img_height = bbox.img_height;
-      pub_box.img_width = bbox.img_width;
 
-      pub_tracking.publish(pub_box);
+    switch(mode){
+      case MODE::NONE:
+        mode = none(images);
+        break;
+
+      case MODE::INIT:
+        mode = init(bbox, state, siammask, images, device);
+        break;
+
+      case MODE::TRACK:
+        mode = track(bbox, state, siammask, images, device, pub_box, pub_tracking);
+        break;
+    }
+
+    //cv::imshow("SiamMask", images);
+    //cv::waitKey(1);
 
     ros::spinOnce();
     loop_rate.sleep();

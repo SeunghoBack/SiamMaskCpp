@@ -1,0 +1,8 @@
+prefix=/home/nearthlab/catkin_ws/src/siammask/cmake-build-debug/devel
+
+Name: siammask
+Description: Description of siammask
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 
