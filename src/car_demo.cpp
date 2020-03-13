@@ -10,8 +10,8 @@
 #include <niv_comm/DlBbox.h>
 #include <sensor_msgs/Image.h>
 
-#define O_WIDTH     644
-#define O_HEIGHT    482
+#define O_WIDTH     640
+#define O_HEIGHT    480
 
 unsigned char Img_data[O_WIDTH*O_HEIGHT*3];
 
